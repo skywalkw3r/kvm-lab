@@ -1,0 +1,41 @@
+- name: Wait for the VM to answer SSH (first boot runs cloud-init)
+  ansible.builtin.wait_for_connection:
+    timeout: 300
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  failed_when: false
+
+# Nested virtualization check. If this fails, KVM can't run inside the VM.
+- name: Check that /dev/kvm exists
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: dev_kvm
+
+- name: Explain how to fix a missing /dev/kvm
+  ansible.builtin.fail:
+    msg: >-
+      /dev/kvm is missing on {{ inventory_hostname }}, so nested virtualization is off.
+      On the Proxmox host, check: cat /sys/module/kvm_intel/parameters/nested
+      (or kvm_amd). It must print Y or 1. The VM's CPU type must be "host",
+      which terraform/vms.tf already sets. See labs/01-kvm/README.md.
+  when: not dev_kvm.stat.exists
+
+- name: Enable CRB repo (EL9 needs it for some lab tools)
+  ansible.builtin.command: dnf config-manager --set-enabled crb
+  when: ansible_facts["distribution"] == "CentOS"
+  changed_when: false
+
+- name: Install lab tools
+  ansible.builtin.dnf:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Copy the labs into the VM
+  ansible.builtin.copy:
+    src: "{{ inventory_dir }}/../labs/"
+    dest: "{{ lab_dir }}/"
+    owner: lab
+    group: lab
+    mode: preserve

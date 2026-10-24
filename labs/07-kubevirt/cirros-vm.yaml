@@ -1,0 +1,33 @@
+# A KubeVirt VirtualMachine: the same small CirrOS guest as labs 03 and 04,
+# described as a Kubernetes object. The disk is a container image ("containerDisk").
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: lab-cirros
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: lab-cirros
+    spec:
+      domain:
+        cpu:
+          cores: 2
+        memory:
+          guest: 512Mi
+        devices:
+          disks:
+            - name: root
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: root
+          containerDisk:
+            image: quay.io/kubevirt/cirros-container-disk-demo:v1.9.1

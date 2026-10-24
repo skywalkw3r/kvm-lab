@@ -1,0 +1,25 @@
+# engine-setup answer file: everything not listed here takes the default
+# (engine-setup --accept-defaults). Optional extras are switched off to keep the lab small.
+[environment:default]
+OVESETUP_CONFIG/fqdn=str:{{ ovirt_engine_fqdn }}
+OVESETUP_CONFIG/adminPassword=str:{{ ovirt_admin_password }}
+OVESETUP_CONFIG/applicationMode=str:virt
+OVESETUP_CONFIG/firewallManager=none:None
+OVESETUP_PKI/organization=str:{{ ovirt_domain }}
+OVESETUP_DWH_CORE/enable=bool:False
+OVESETUP_GRAFANA_CORE/enable=bool:False
+OVESETUP_OVN/ovirtProviderOvn=bool:False
+OVESETUP_VMCONSOLE_PROXY_CONFIG/vmconsoleProxyConfig=bool:False
+OVESETUP_CONFIG/imageioProxyConfig=bool:True
+OVESETUP_ENGINE_CORE/enable=bool:True
+
+# Let engine-setup install and configure a local PostgreSQL for the engine.
+# The host and port must be given too: setup only fills them in itself when someone
+# answers "Local" interactively, and without them --accept-defaults loops forever.
+OVESETUP_PROVISIONING/postgresProvisioningEnabled=bool:True
+OVESETUP_DB/host=str:localhost
+OVESETUP_DB/port=int:5432
+
+# oVirt 4.5 enables Keycloak SSO by default. Keep the lab on the built-in
+# admin@internal account (the role's REST calls and the lab README use it).
+OVESETUP_CONFIG/keycloakEnable=bool:False

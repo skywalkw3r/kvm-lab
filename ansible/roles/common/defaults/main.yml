@@ -1,0 +1,17 @@
+common_packages:
+  - git
+  - vim-enhanced
+  - tmux
+  - jq
+  - socat
+  - strace
+  - perf
+  - bpftrace
+  - gcc
+  - make
+  - binutils
+  - tcpdump
+  - lsof
+
+# Where the repo's labs/ folder is copied on each VM.
+lab_dir: /home/lab/labs

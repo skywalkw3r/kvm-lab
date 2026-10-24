@@ -1,0 +1,50 @@
+- name: Install the oVirt 4.5 repositories (CentOS Virtualization SIG)
+  ansible.builtin.dnf:
+    name: centos-release-ovirt45
+    state: present
+
+- name: Install VDSM and its CLI client
+  ansible.builtin.dnf:
+    name: [vdsm, vdsm-client]
+    state: present
+
+# With an engine (lab 08), the engine's host-deploy configures VDSM, TLS included.
+# Without one (lab 06), we do it here and run VDSM's API without TLS.
+- name: Standalone VDSM (no engine)
+  when: groups['ovirt_engines'] | default([]) | length == 0
+  block:
+    # Normally oVirt Engine issues VDSM's TLS certificates when it adds the host.
+    # With no engine, run VDSM's API on plain TCP. Fine for a lab, never for production.
+    - name: Run VDSM without TLS
+      ansible.builtin.copy:
+        dest: /etc/vdsm/vdsm.conf.d/50-kvm-lab.conf
+        content: |
+          # kvm-lab: no engine has issued certificates (see labs/06-vdsm)
+          [vars]
+          ssl = false
+        mode: "0644"
+      register: vdsm_conf
+
+    - name: Check whether VDSM has configured libvirt, sanlock, etc.
+      ansible.builtin.command: vdsm-tool is-configured
+      register: vdsm_configured
+      changed_when: false
+      failed_when: false
+
+    # This is the step that rewrites libvirt's config for VDSM (SASL auth, TLS, logging).
+    - name: Let VDSM configure its dependencies
+      ansible.builtin.command: vdsm-tool configure --force
+      when: vdsm_configured.rc != 0 or vdsm_conf.changed
+      changed_when: true
+
+    - name: Restart VDSM after configuration changes
+      ansible.builtin.systemd_service:
+        name: vdsmd
+        state: restarted
+      when: vdsm_configured.rc != 0 or vdsm_conf.changed
+
+    - name: Make sure VDSM is running
+      ansible.builtin.systemd_service:
+        name: vdsmd
+        enabled: true
+        state: started

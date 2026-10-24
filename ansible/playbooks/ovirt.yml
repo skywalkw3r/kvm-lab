@@ -1,0 +1,9 @@
+# lab-ovirt-engine: oVirt Engine, which then takes over lab-vdsm as its host (lab 08).
+# Needs an admin password for the engine web UI:
+#   OVIRT_ADMIN_PASSWORD='...' ansible-playbook playbooks/ovirt.yml
+- name: Install oVirt Engine
+  hosts: ovirt_engines
+  become: true
+  roles:
+    - common
+    - ovirt_engine

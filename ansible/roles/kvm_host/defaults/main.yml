@@ -1,0 +1,18 @@
+kvm_host_packages:
+  - qemu-kvm          # QEMU with KVM support for this architecture
+  - qemu-img
+  - edk2-ovmf         # UEFI firmware for guests
+  - libvirt
+  - virt-install
+  - guestfs-tools     # virt-customize, virt-cat, ...
+  - xorriso           # builds the cloud-init seed ISOs in labs 03-04
+  - python3-libvirt   # for the libvirt API example in lab 04
+
+# Modular libvirt daemons: one per driver, started on demand by their sockets.
+kvm_host_libvirt_sockets:
+  - virtqemud.socket
+  - virtnetworkd.socket
+  - virtstoraged.socket
+  - virtnodedevd.socket
+  - virtsecretd.socket
+  - virtproxyd.socket

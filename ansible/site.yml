@@ -1,0 +1,10 @@
+# Configure every lab VM that Terraform created. Hosts that don't exist are skipped.
+#   ansible-playbook site.yml
+- name: Labs 01-04 (KVM, QEMU, libvirt)
+  ansible.builtin.import_playbook: playbooks/kvm.yml
+- name: Lab 06 (VDSM)
+  ansible.builtin.import_playbook: playbooks/vdsm.yml
+- name: Lab 07 (KubeVirt)
+  ansible.builtin.import_playbook: playbooks/kubevirt.yml
+- name: Lab 08 (oVirt Engine)
+  ansible.builtin.import_playbook: playbooks/ovirt.yml

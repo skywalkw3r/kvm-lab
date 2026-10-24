@@ -1,0 +1,5 @@
+# These roles are meant to be read top to bottom by people learning the stack,
+# so two production-style rules are relaxed on purpose:
+skip_list:
+  - var-naming[no-role-prefix] # short names like `dc` and `host_state` read better in a lab
+  - no-handler                 # inline "when: x.changed" steps keep the order of operations visible

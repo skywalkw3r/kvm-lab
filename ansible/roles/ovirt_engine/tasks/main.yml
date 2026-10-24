@@ -1,0 +1,252 @@
+- name: Require an admin password
+  ansible.builtin.assert:
+    that: ovirt_admin_password | length >= 8
+    fail_msg: Set OVIRT_ADMIN_PASSWORD (8+ characters) in .env first.
+    quiet: true
+
+- name: Find the oVirt host VM
+  ansible.builtin.assert:
+    that: groups['vdsm_hosts'] | default([]) | length > 0
+    fail_msg: The engine needs a host to manage. Terraform turns on lab-vdsm with ovirt_engine = true; run make up.
+    quiet: true
+
+- name: Remember the host's inventory name
+  ansible.builtin.set_fact:
+    ovirt_host_inventory: "{{ groups['vdsm_hosts'][0] }}"
+
+# ---- Names ------------------------------------------------------------------------
+
+# Proxmox's cloud-init config sets manage_etc_hosts: true, so cloud-init rewrites
+# /etc/hosts from a template on every boot, and host deploy reboots lab-vdsm.
+# Writing the template too makes the names survive reboots.
+- name: Put the engine and host FQDNs in /etc/hosts and cloud-init's template (engine and host)
+  ansible.builtin.blockinfile:
+    path: "{{ item.1 }}"
+    marker: "# {mark} kvm-lab oVirt"
+    block: |
+      {{ ansible_host }} {{ ovirt_engine_fqdn }} lab-ovirt-engine
+      {{ hostvars[ovirt_host_inventory].ansible_host }} {{ ovirt_host_fqdn }} {{ ovirt_host_name }}
+  delegate_to: "{{ item.0 }}"
+  loop: "{{ [inventory_hostname, ovirt_host_inventory] | product(['/etc/hosts', '/etc/cloud/templates/hosts.redhat.tmpl']) | list }}"
+
+- name: Set the engine's hostname to its FQDN
+  ansible.builtin.hostname:
+    name: "{{ ovirt_engine_fqdn }}"
+
+# ---- Install and run engine-setup -------------------------------------------------
+
+- name: Install the oVirt 4.5 repositories (CentOS Virtualization SIG)
+  ansible.builtin.dnf:
+    name: centos-release-ovirt45
+    state: present
+
+- name: Install oVirt Engine (Java app, PostgreSQL, Apache front end)
+  ansible.builtin.dnf:
+    name: ovirt-engine
+    state: present
+
+- name: Write the engine-setup answer file
+  ansible.builtin.template:
+    src: answers.conf.j2
+    dest: /root/kvm-lab-answers.conf
+    mode: "0600"
+
+- name: Run engine-setup (takes several minutes)
+  ansible.builtin.command: >-
+    engine-setup --config-append=/root/kvm-lab-answers.conf --accept-defaults --offline
+  args:
+    creates: /etc/ovirt-engine-setup.conf.d/20-setup-ovirt-post.conf
+  no_log: true
+
+# The engine only accepts logins on its FQDN. Also allow the plain IP, so the
+# web UI works from your laptop without editing its hosts file.
+- name: Allow web UI logins by IP address
+  ansible.builtin.copy:
+    dest: /etc/ovirt-engine/engine.conf.d/99-kvm-lab-sso.conf
+    content: SSO_ALTERNATE_ENGINE_FQDNS="{{ ansible_host }}"
+    mode: "0644"
+  register: sso_conf
+
+- name: Restart the engine to pick up the SSO setting
+  ansible.builtin.systemd_service:
+    name: ovirt-engine
+    state: restarted
+  when: sso_conf.changed
+
+- name: Wait for the engine's health page
+  ansible.builtin.uri:
+    url: http://localhost/ovirt-engine/services/health
+    return_content: true
+  register: health
+  until: "'DB Up' in health.content"
+  retries: 60
+  delay: 5
+
+# ---- Storage: an NFS export on this VM --------------------------------------------
+
+- name: Install the NFS server
+  ansible.builtin.dnf:
+    name: nfs-utils
+    state: present
+
+- name: Create the export, owned by vdsm:kvm (uid/gid 36 on every oVirt host)
+  ansible.builtin.file:
+    path: "{{ ovirt_nfs_path }}"
+    state: directory
+    owner: "36"
+    group: "36"
+    mode: "0755"
+
+- name: Export it to the lab
+  ansible.builtin.copy:
+    dest: /etc/exports.d/kvm-lab.exports
+    content: "{{ ovirt_nfs_path }} *(rw,sync,no_subtree_check,all_squash,anonuid=36,anongid=36)\n"
+    mode: "0644"
+  register: exports
+
+- name: Start the NFS server
+  ansible.builtin.systemd_service:
+    name: nfs-server
+    enabled: true
+    state: started
+
+- name: Re-export after changes
+  ansible.builtin.command: exportfs -ra
+  when: exports.changed
+  changed_when: true
+
+# ---- Hand lab-vdsm over to the engine ---------------------------------------------
+
+- name: Fetch the engine's SSH public key (host-deploy logs in to hosts as root with it)
+  ansible.builtin.uri:
+    url: "http://localhost/ovirt-engine/services/pki-resource?resource=engine-certificate&format=OPENSSH-PUBKEY"
+    return_content: true
+  register: engine_pubkey
+
+- name: Authorize the engine's key for root on the host
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ engine_pubkey.content | trim }}"
+  delegate_to: "{{ ovirt_host_inventory }}"
+
+- name: Remove lab 06's no-TLS override; the engine issues real certificates now
+  ansible.builtin.file:
+    path: /etc/vdsm/vdsm.conf.d/50-kvm-lab.conf
+    state: absent
+  delegate_to: "{{ ovirt_host_inventory }}"
+
+- name: Look up the host in the engine
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/hosts?search=name%3D{{ ovirt_host_name }}"
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    return_content: true
+  register: existing_host
+  no_log: true
+
+- name: Add the host (the engine SSHes in and redeploys VDSM with TLS, about 5-10 minutes)
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/hosts"
+    method: POST
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    body_format: json
+    body:
+      name: "{{ ovirt_host_name }}"
+      address: "{{ ovirt_host_fqdn }}"
+      ssh: { authentication_method: publickey }
+      cluster: { name: Default }
+    status_code: 201
+  when: (existing_host.json.host | default([])) | length == 0
+  no_log: true
+
+- name: Wait for the host to come Up
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/hosts?search=name%3D{{ ovirt_host_name }}"
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    return_content: true
+  register: host_state
+  until: (host_state.json.host | default([{}]))[0].status | default('') in ['up', 'install_failed', 'non_operational']
+  retries: 120
+  delay: 10
+  no_log: true
+
+- name: Stop if host deploy failed
+  ansible.builtin.fail:
+    msg: >-
+      Host status is {{ host_state.json.host[0].status }}. On the engine, look in
+      /var/log/ovirt-engine/host-deploy/ for the newest log.
+  when: host_state.json.host[0].status != 'up'
+
+- name: Look up the data storage domain
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/storagedomains?search=name%3Ddata"
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    return_content: true
+  register: existing_sd
+  no_log: true
+
+- name: Create the NFS data storage domain
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/storagedomains"
+    method: POST
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    body_format: json
+    body:
+      name: data
+      type: data
+      storage: { type: nfs, address: "{{ ovirt_engine_fqdn }}", path: "{{ ovirt_nfs_path }}" }
+      host: { name: "{{ ovirt_host_name }}" }
+    status_code: 201
+    timeout: 300
+  when: (existing_sd.json.storage_domain | default([])) | length == 0
+  no_log: true
+
+- name: Look up the Default data center
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/datacenters?search=name%3DDefault"
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    return_content: true
+  register: dc
+  no_log: true
+
+- name: Attach the storage domain to the data center (this makes the DC Up)
+  ansible.builtin.uri:
+    url: "{{ ovirt_api }}/datacenters/{{ dc.json.data_center[0].id }}/storagedomains"
+    method: POST
+    url_username: admin@internal
+    url_password: "{{ ovirt_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers: { Accept: application/json }
+    body_format: json
+    body: { name: data }
+    status_code: [201, 409]
+    timeout: 300
+  no_log: true
+
+- name: Where to log in
+  ansible.builtin.debug:
+    msg: "oVirt web UI: https://{{ ansible_host }}/ovirt-engine/  (user admin, profile internal)"

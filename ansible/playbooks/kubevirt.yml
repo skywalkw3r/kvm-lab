@@ -1,0 +1,7 @@
+# lab-kubevirt: single-node k3s running KubeVirt (lab 07).
+- name: KubeVirt on k3s
+  hosts: kubevirt_hosts
+  become: true
+  roles:
+    - common
+    - kubevirt

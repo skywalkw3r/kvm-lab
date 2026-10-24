@@ -1,0 +1,7 @@
+# lab-vdsm: oVirt's host agent on top of libvirt, with no engine (lab 06).
+- name: VDSM host
+  hosts: vdsm_hosts
+  become: true
+  roles:
+    - common
+    - vdsm

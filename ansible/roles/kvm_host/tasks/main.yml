@@ -1,0 +1,41 @@
+- name: Install QEMU and libvirt
+  ansible.builtin.dnf:
+    name: "{{ kvm_host_packages }}"
+    state: present
+
+- name: Start the libvirt daemons' sockets
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ kvm_host_libvirt_sockets }}"
+
+- name: Let the lab user use /dev/kvm and libvirt without sudo
+  ansible.builtin.user:
+    name: lab
+    groups: [kvm, libvirt, qemu]
+    append: true
+
+- name: Point virsh at the system libvirt instance by default
+  ansible.builtin.lineinfile:
+    path: /home/lab/.bashrc
+    line: export LIBVIRT_DEFAULT_URI=qemu:///system
+    owner: lab
+    group: lab
+    create: true
+    mode: "0644"
+
+- name: Check for libvirt's default NAT network
+  ansible.builtin.command: virsh -c qemu:///system net-info default
+  register: default_net
+  changed_when: false
+
+- name: Autostart libvirt's default NAT network
+  ansible.builtin.command: virsh -c qemu:///system net-autostart default
+  when: "'Autostart:      no' in default_net.stdout"
+  changed_when: true
+
+- name: Start libvirt's default NAT network
+  ansible.builtin.command: virsh -c qemu:///system net-start default
+  when: "'Active:         no' in default_net.stdout"
+  changed_when: true

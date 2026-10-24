@@ -1,0 +1,5 @@
+k3s_version: v1.36.5+k3s1
+# Full path: Ansible runs commands through sudo, and EL9's sudo PATH leaves out /usr/local/bin.
+k3s_bin: /usr/local/bin/k3s
+kubevirt_version: v1.9.1
+kubevirt_release_url: "https://github.com/kubevirt/kubevirt/releases/download/{{ kubevirt_version }}"

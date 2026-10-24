@@ -1,0 +1,14 @@
+# oVirt insists on resolvable FQDNs. The lab writes them into /etc/hosts
+# on the engine and the host, so no DNS changes are needed.
+ovirt_domain: kvm-lab.test
+ovirt_engine_fqdn: "lab-ovirt-engine.{{ ovirt_domain }}"
+ovirt_host_name: lab-vdsm
+ovirt_host_fqdn: "{{ ovirt_host_name }}.{{ ovirt_domain }}"
+
+# Password for admin@ovirt (web UI) and admin@internal (REST API). From .env.
+ovirt_admin_password: "{{ lookup('env', 'OVIRT_ADMIN_PASSWORD') }}"
+
+# NFS export on the engine VM that becomes the data center's storage.
+ovirt_nfs_path: /exports/data
+
+ovirt_api: "https://{{ ovirt_engine_fqdn }}/ovirt-engine/api"

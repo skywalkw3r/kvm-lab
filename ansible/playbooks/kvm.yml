@@ -1,0 +1,7 @@
+# lab-kvm: a plain Linux box with KVM, QEMU and libvirt (labs 01-04).
+- name: KVM / QEMU / libvirt host
+  hosts: kvm_hosts
+  become: true
+  roles:
+    - common
+    - kvm_host

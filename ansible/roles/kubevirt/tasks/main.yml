@@ -1,0 +1,53 @@
+- name: Download the k3s installer
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /usr/local/bin/k3s-install.sh
+    mode: "0755"
+
+- name: Install k3s (single node)
+  ansible.builtin.command: /usr/local/bin/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: --disable traefik --write-kubeconfig-mode 0644
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for the node to be Ready
+  ansible.builtin.command: "{{ k3s_bin }} kubectl wait --for=condition=Ready node --all --timeout=300s"
+  changed_when: false
+
+- name: Install the KubeVirt operator and its custom resource
+  ansible.builtin.command: "{{ k3s_bin }} kubectl apply -f {{ kubevirt_release_url }}/{{ item }}"
+  loop:
+    - kubevirt-operator.yaml
+    - kubevirt-cr.yaml
+  register: kv_apply
+  changed_when: "'created' in kv_apply.stdout or 'configured' in kv_apply.stdout"
+
+- name: Wait for KubeVirt to be Available (pulls several images, takes a few minutes)
+  ansible.builtin.command: >-
+    {{ k3s_bin }} kubectl -n kubevirt wait kv kubevirt --for=condition=Available --timeout=900s
+  changed_when: false
+
+- name: Install virtctl
+  ansible.builtin.get_url:
+    url: "{{ kubevirt_release_url }}/virtctl-{{ kubevirt_version }}-linux-amd64"
+    dest: /usr/local/bin/virtctl
+    mode: "0755"
+
+- name: Create ~/.kube for the lab user
+  ansible.builtin.file:
+    path: /home/lab/.kube
+    state: directory
+    owner: lab
+    group: lab
+    mode: "0700"
+
+- name: Give the lab user a kubeconfig
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /home/lab/.kube/config
+    remote_src: true
+    owner: lab
+    group: lab
+    mode: "0600"

@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars (git-ignored) and edit for your Proxmox.
+
+pve_endpoint     = "https://pve.example.com:8006/"
+pve_insecure_tls = true # self-signed certificate on a lab node
+pve_node         = "pve"
+
+image_datastore = "local"     # needs the "import" content type (scripts/pve-setup.sh)
+vm_datastore    = "local-lvm" # or local-zfs, ...
+bridge          = "vmbr0"
+# vlan_id       = 10          # if the bridge is VLAN-aware and the lab goes on a tagged VLAN
+vm_id_base      = 900         # VMs become 901..904
+
+ssh_public_keys = [
+  "ssh-ed25519 AAAA... you@laptop",
+]
+
+# Turn labs on as you reach them. Each running VM uses 6-8 GB of RAM.
+labs = {
+  kvm          = true
+  vdsm         = false
+  kubevirt     = false
+  ovirt_engine = false # also turns on the vdsm VM, which becomes its host
+}
+
+# Optional static addresses (the default is DHCP):
+# ipv4         = { kvm = "192.168.10.51/24", vdsm = "192.168.10.52/24" }
+# ipv4_gateway = "192.168.10.1"
+# dns_servers  = ["192.168.10.1"]
